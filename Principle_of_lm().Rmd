@@ -1,0 +1,88 @@
+---
+title: "Principle_of_lm()"
+author: "Xuening"
+date: "4/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## An example of `lm()`
+
+We'll use the the expression level of a single gene as an example. Is the expression level of the 10th gene significantly different between ALL patients and healthy people?
+```{r message=FALSE, warning=FALSE}
+# load dataset
+library(leukemiasEset)
+data(leukemiasEset)
+
+# Select only ALL and NoL data
+idx <- which(pData(leukemiasEset)$LeukemiaType %in% c("ALL","NoL"))
+leukemiasEset <- leukemiasEset[,idx]
+# Drop levels, so that there will still be only 2 levels in column "LeukemiaType"
+pData(leukemiasEset)$LeukemiaType <- droplevels(pData(leukemiasEset)$LeukemiaType) 
+
+# store the expression level of first gene in y
+y <- exprs(leukemiasEset)[10,]
+head(y)
+# store the LeukemiaType in x
+x <- pData(leukemiasEset)$LeukemiaType
+head(x)
+```
+
+Let's see how different are the expression level in each group using `stripchart()` and `boxplot()`.
+```{r}
+par(mfrow=c(1,2))
+stripchart(y~x,vertical=T,method="jitter",main="Expression level of 10th gene")
+boxplot(y~x,main="Expression level of 10th gene")
+```
+
+Difference? yes. Significant difference? Well this needs further examination.  
+
+We can fit a linear model using `lm()`. The first step is to create a model matrix.
+```{r}
+X  <- model.matrix(~x)
+head(X)
+# rename X
+colnames(X)[2] <-"NoL"
+head(X)
+fit <- lm(y~X+0) # +0 means not add a new intercept when lm() is called
+summary(fit)
+```
+
+Since `Pr(>|t|)` for second coefficient `XNoL` is 0.0296 and smaller than 0.05, we can conclude that there is significant difference in expression level of 10th gene between ALL patients and healthy people.
+
+## Solve linear regression using matrix inverse
+
+For linear model construction, we assume that the true relationship between `X` and `y` is $y=X\beta+\epsilon$. Since `lm()` uses least square estimation, it tries to find $\hat\beta$ such that the residual sum of squares $RSS=(Y-X\beta)^T(Y-X\beta)$ is minimized. By solving $\frac{\partial RSS}{\partial \beta}=0$ we have $X^TX\hat\beta=X^TY$. The solution is $$\hat\beta=(X^T X)^{-1}X^T Y$$
+Let's see whether this method produce same result as `lm()`.
+
+```{r}
+solve(t(X) %*% X) %*% t(X) %*% y
+```
+
+Hooray! Same result!! Even simpler code:
+```{r}
+solve(crossprod(X)) %*% crossprod(X,y)
+```
+
+## Solve linear regression using QR factorization
+If we can factorize $X$ into the product of an orthomornal matrix $Q$ ($Q^T Q=I$) and an upper triangular matrix $R$, then $X^TX\hat\beta=X^TY$ can be simplified:
+$$(QR)^T(QR)\beta=(QR)^T Y$$
+$$R^T R\beta=R^T Q^T Y$$
+$$R\beta=Q^T Y$$
+Function `qr()` can perform QR decomposition:
+```{r}
+QR <- qr(X)
+QR
+Q <- qr.Q(QR)
+Q
+R <- qr.R(QR)
+R
+```
+
+```{r}
+backsolve(R, crossprod(Q,y) )
+```
+

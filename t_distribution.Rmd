@@ -1,0 +1,50 @@
+---
+title: "t_distribution"
+author: "Xuening"
+date: "4/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## t-statistic as a next best alternative to z-statistic
+$Z=\frac{\bar{X}-\mu}{\sigma/\sqrt{n}}$ observes normal distribution. However, in reality, we often don't know $\sigma$, the population standard deviation.  
+  
+What if we use sample standard distribution as an approximation to $\sigma$? Will the distribution of $t=\frac{\bar{X}-\mu}{s/\sqrt{n}}$ change? Notice, the denominator of sample variance and standard deviation is $n-1$ and the denominator of population variance nad population standard deviation is $n$. Luckily the R functions `var()` and `sd()` uses denominator $n-1$.
+```{r}
+population <- rpois(100,5) # uniform distribution with min=0 and max=1
+hist(population)
+
+sizes <- c(5,10,20,30)
+par(mfrow=c(2,2))
+for (size in sizes){
+        samples <- replicate(1000,sample(population,size,replace=T))
+        t <- apply(samples,2,function(this_col){
+                (mean(this_col)-5)*sqrt(size)/sd(this_col)
+        })
+        hist(t,main=paste0("Sample size=",size),breaks = 20)
+}
+```
+
+We can see that when sample size is small, the frequency of extreme values seems higher than that when sample size is large. This is because we have a random variable as the denominator of t. When the sample standard deviation $s$ happen to be very small, boom, the $|t|$ can be very large.  
+
+Let's use quantiles to see how the distribution of $t=\frac{\bar{X}-\mu}{s/\sqrt{n}}$ compares to normal distribution.
+```{r}
+#using quantiles to compare with normal distribution
+par(mfrow=c(2,2))
+for (size in sizes){
+        samples <- replicate(1000,sample(population,size,replace=T))
+        t <- apply(samples,2,function(this_col){
+                (mean(this_col)-5)*sqrt(size)/sd(this_col)
+        })
+        qqnorm(t,main=paste0("Sample size=",size),cex=0.5)
+        qqline(t)
+}
+```
+
+This shows the relationship between t distribution and normal distribution: as sample size gets larger, t distribution become increasingly similar to normal distribution.
+
+## Conclusion
+Therefore, central limit theorem applies poorly when population variance is unknown. In reality, $t=\frac{\bar{X}-\mu}{s/\sqrt{n}}$ observes t-distribution, a bell-shaped curve with both tails thicker than normal distribution.

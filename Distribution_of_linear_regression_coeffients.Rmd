@@ -1,0 +1,186 @@
+---
+title: "Distribution_of_linear_regression_coeffients"
+author: "Xuening"
+date: "4/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## An example of falling object
+Suppose an object falls from $56.67m$ with initial velocity $0m/s$. Suppose we measure its location at different moments to try to estimate gravitational constant. Finally we suppose measurement error is normally distributed with standard deviation 1.
+
+```{r}
+h0 <- 56.67
+g <- 9.8
+n <- 25
+tt <- seq(0,3.4,len=n)
+set.seed(1)
+y <- h0-0.5*g*tt^2+rnorm(n,mean=0,sd=1)
+plot(tt,y)
+```
+
+Then let's fit the observation `y` with a linear model to figure out $g$. To be more concrete:
+
+$$y=
+\left[
+  \begin{matrix}
+  y_1\\
+  y_2\\
+  \vdots\\
+  y_n\\
+  \end{matrix}
+\right]
+$$
+
+$$X=
+\left[
+  \begin{matrix}
+  1 & t_1 & t_1^2\\
+  1 & t_2 & t_2^2\\
+  \vdots &\vdots &\vdots\\
+  1 & t_n & t_n^2\\
+  \end{matrix}
+\right]
+$$
+
+$$\beta=
+\left[
+  \begin{matrix}
+  \beta_1\\
+  \beta_2\\
+  \beta_3\\
+  \end{matrix}
+\right]=
+\left[
+  \begin{matrix}
+  h_0\\
+  v_0\\
+  -\frac{1}{2}g\\
+  \end{matrix}
+\right]
+$$
+$$\epsilon=
+\left[
+  \begin{matrix}
+  \epsilon_1\\
+  \epsilon_2\\
+  \vdots\\
+  \epsilon_n\\
+  \end{matrix}
+\right]
+$$
+
+Our model is: $$y=X\beta+\epsilon$$
+And solution is: $$\beta=(X^T X)^{-1}X^T Y$$
+```{r}
+X <- model.matrix(~tt+I(tt^2))
+head(X)
+beta <- solve(crossprod(X)) %*% t(X) %*% y
+beta
+```
+
+Here true value of `beta[3]` is the $-\frac{1}{2}g$. Since it's a linear combination of $y$, it will change as $y$ changes due to measurement error. What is the distribution of `beta[3]`, if we measure $y$ for 10000 times? Let's first build a function to find beta automatically. Then repeat for 10000 times
+
+```{r}
+find_beta3 <- function(){
+        y <- h0-0.5*g*tt^2+rnorm(n,mean=0,sd=1)
+        beta <- solve(crossprod(X)) %*% t(X) %*% y
+        return(beta[3])
+}
+set.seed(1)
+beta3 <- replicate(10000,find_beta3())
+head(beta3)
+par(mfrow=c(1,2))
+hist(beta3,breaks=20)
+qqnorm(beta3)
+qqline(beta3)
+mean(beta3)
+sd(beta3)
+```
+
+Look $\beta_3$ is normal distributed around its true value: -4.9 with standard deviation around 0.2. This is not an accident because $\beta_3$ is a linear combination of $y$, and $y$ is normally distributed.
+
+## Covariance matrix of $Y$
+In the previous discussions, $y$ is one observation containing 25 numbers written in one column. If we pile up our 5 observations column by column, we'll get a matrix $Y$. 
+```{r}
+Y <- replicate(5,h0-0.5*g*tt^2+rnorm(n,mean=0,sd=1))
+head(Y)
+cov(Y)
+```
+
+Is this the covariance matrix of $Y$ mathematically? No, because mathematically $X$ is considered fixed. That is to say, Denote the $i$-th observation $Y_i$, then $var(Y_i)=var(X\beta)+var(\epsilon_i)$, and $var(X\beta)=0$ (this is where math and code differ) so $var(Y_i)=var(\epsilon_i)=\sigma^2$. Let's subtract the variance that $X$ can explain and try again.
+
+```{r}
+beta <- matrix(c(56.67,0,-4.9))
+cov(Y-as.numeric(X%*%beta))
+```
+
+
+Theoretically,
+$$Cov(Y_i,Y_i)=var(Y_i)=\sigma^2$$
+Since obeservations are independent of each other, we have
+$$Cov(Y_i,Y_j)=0, i\neq j $$
+Therefore,the variance-covariance matrix of $Y$ is:
+$$ var(Y)=\sigma^2 I$$
+Here $\sigma^2$ is the variance of $\epsilon$ (measurement error), but still unknown. We need to estimate it.   
+
+## Estimate $\sigma^2$
+Define residual $r=y-X\hat\beta$, then $r$ is an estimation of $\epsilon$. 
+$$\hat\sigma^2=\frac{1}{n-p}r^T r=\frac{1}{n-p}\sum_{i=1}^n r_i^2$$
+Here $n$ is sample size and $p$ is the number of parameters, or the number of columns in $X$. From the simulation process we know the true value $\sigma^2=1$. Let's estimate $\sigma^2$ using residuals.
+
+```{r}
+beta <- solve(crossprod(X)) %*% t(X) %*% y
+r <-y-X%*%beta
+sigma_hat2 <- sum(r^2)/(25-3)
+sigma_hat2
+```
+
+
+## Estimate standard error of $\beta$
+$\beta$ is a linear combination of y: $\beta=Ay$ with $A=(X^TX)^{-1}X^T$. Since
+$$var(Ay)=Avar(y)A^T$$
+We have
+$$var(\hat\beta)=\sigma^2(X^T X)^{-1}$$
+
+This result can also be interpreted intuitively. The large the variance in independent variable, the smaller the variance (uncertainty) of least square estimation. Intuitively this is because large variance in independent variable contain more information.  
+  
+Let's compute the variance of $\beta$,
+```{r}
+var_beta <- sigma_hat2*solve(crossprod(X))
+var_beta
+```
+then the standard deviation of $\beta_3$:
+```{r}
+sqrt(var_beta[3,3])
+```
+
+Let's compare with the result of `lm()`:
+```{r}
+summary(lm(y~X))
+```
+
+0.2109615. The same!  
+  
+Notice: `Std. Error` is just the standard deviation of each coefficient.  
+  
+Notice, the `Residual standard error` is $\hat\sigma$, the estimation of standard deviation of $\epsilon$. We can try.
+
+```{r}
+sqrt(sigma_hat2)
+```
+
+0.9822! The same!  
+  
+  
+The last thing to notice: $t=\frac{\hat\beta}{sd(\hat\beta)}$ observes t distribution, with degree of freedom $n-p$
+```{r}
+tval <- summary(lm(y~X))$coef[2,1]/summary(lm(y~X))$coef[2,2]
+tval
+pval <- 2*pt(-abs(tval),df=25-3)
+pval
+```
+ As `Pr(>|t|)` tells us, the intercept and the coefficients for `tt^2` is significantly different from $0$, but the coefficient for `tt` is not significantly different from $0$.

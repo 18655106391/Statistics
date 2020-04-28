@@ -1,0 +1,250 @@
+---
+title: "Problem_with_multiple_comparison"
+author: "Xuening"
+date: "4/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## When null is true, P value is a uniformly distributed random variable
+```{r}
+control_population <- rnorm(100,20,3)
+sample_size <- 12
+pvals <- replicate(10000,{
+        control_sample <-sample(control_population,sample_size)
+        experiment_sample <- sample(control_population,sample_size)
+        t.test(control_sample,experiment_sample)$p.val
+})
+hist(pvals,breaks=40)
+```
+
+## High false positive rate when performing thousands of tests
+
+First we prepare the data set.
+```{r message=FALSE, warning=FALSE}
+# load dataset
+library(leukemiasEset)
+data(leukemiasEset)
+
+# Select only ALL and NoL data
+idx <- which(pData(leukemiasEset)$LeukemiaType %in% c("ALL","NoL"))
+leukemiasEset <- leukemiasEset[,idx]
+# Drop levels, so that there will still be only 2 levels in column "LeukemiaType"
+pData(leukemiasEset)$LeukemiaType <- droplevels(pData(leukemiasEset)$LeukemiaType) 
+
+dim(leukemiasEset)
+```
+
+For every gene, we can ask whether its expression level is significantly different between ALL patients and healthy people.
+```{r}
+idx_healthy <- which(pData(leukemiasEset)$LeukemiaType =="NoL")
+idx_ALL <- which(pData(leukemiasEset)$LeukemiaType =="ALL")
+pvals <- apply(exprs(leukemiasEset),1,function(this_row){
+        t.test(this_row[idx_healthy],this_row[idx_ALL])$p.value
+})
+sum(pvals<0.05)
+```
+
+What?? 7332 genes are differentially expressed?? Actually no. Quite a lot is false positive. We can try the same analysis with a completely random data with no differential analysis at all.
+```{r}
+set.seed(1)
+m <- nrow(exprs(leukemiasEset))
+n <- ncol(exprs(leukemiasEset))
+randomData <- matrix(rnorm(n*m),m,n)
+nullpvals <- apply(randomData,1,function(this_row){
+        t.test(this_row[idx_healthy],this_row[idx_ALL])$p.value
+})
+sum(nullpvals<0.05)
+```
+
+Notice, we have 20172 genes in total. 20172*0.05=1009, not far from the number of false positive: 986. This is not a coincidence. When null is true, p value is exactly false positive rate.
+
+## Monte Carlo simulation for a more complicated case
+
+Suppose there are $m$ genes in total, among which $m_0$ genes are differentially expressed between groups, and $m_1$ genes are not differentially expressed between groups. After the testing, $R$ genes are called significant, so $m-R$ are not called significant. Among the $R$ genes called significant, $V$ genes are actually not differentially expressed, while $S$ genes are actually significant.  
+  
+This is to say, there is $S$ true positive, $V$ false positive (type I error), $m_1-S$ false negative (type II error). Let's define the truth.
+
+```{r}
+alpha <- 0.05 # false positive rate for a sigle hypothesis
+sample_size <- 12
+m <- 20172 # total number of genes
+m1 <- 2000 # around 10% genes are significantly DE
+m0 <- m-m1 # m0 genes are not DE
+
+set.seed(1)
+population_ne <- rnorm(100,mean=20,sd=3) # normal expressed genes
+population_de <- rnorm(100,mean=23,sd=3) # differentially expressed genes
+null_hypothesis <- c(rep(TRUE,m0),rep(FALSE,m1))
+dat_ALL <- t(replicate(m,sample(population_ne,sample_size)))
+dat_NoL_ne <- t(replicate(m0,sample(population_ne,sample_size)))
+dat_NoL_de <- t(replicate(m1,sample(population_de,sample_size)))
+dat_NoL <- rbind(dat_NoL_ne,dat_NoL_de)
+dat <- cbind(dat_ALL,dat_NoL)
+```
+
+This is our simulated dataset. For rows where null_hypothesis is false, we add 3 to the right half of the matrix. Let's see how many DE genes we can find using simple t-test.
+
+```{r}
+calls <- apply(dat,1,function(this_row){
+        # this_row[1:12] records ALL data, this_row[13:24] records NoL data 
+        ifelse(t.test(this_row[1:12],this_row[13:24])$p.val<alpha,"Call significant", "Not call significant")
+})
+table(calls)
+table(calls,null_hypothesis)
+```
+
+So this time there is 869 false negative result and 674 false positive result, i.e. $V=674$, $S=1131$.  
+   
+Since the sampling process may generate different samples, $V$ and $S$ are all random variables.
+
+## Family-wise error rate (FWER)
+The FWER is the probability of making at least one type I error in all hypothesis testing.  
+$$FWER=Pr(V\geq1)$$
+Or
+$$FWER=1-Pr(V=0)$$
+
+## Bonferroni Correction
+
+We can reduce $V$ by rejecting hypotheses at a more strict level. Instead of rejecting hypothesis $i$ when $p_i<\alpha$, Bonferroni Correction require that we reject hypothesis when  $p_i<\frac{\alpha}{m}$. Let's try.
+
+```{r}
+m <- 20172 # number of hypotheses
+calls <- apply(dat,1,function(this_row){
+        # this_row[1:12] records ALL data, this_row[13:24] records NoL data 
+        ifelse(t.test(this_row[1:12],this_row[13:24])$p.val<alpha/m,"Call significant", "Not call significant")
+})
+table(calls)
+table(calls,null_hypothesis)
+```
+
+Mathematically FWER is controlled: there is no false positive, but at the expense of huge false negative. All of the 2000 DE genes are not called significant. We need a FWER control method that is less strick.
+
+## False discovery rate (FDR)
+
+Instead, we can focus on $Q=V/R$, i.e. among all the genes we called significant, what proportion is false positive? NOtice, $Q$, the proportion of false positive, is a random variable ranged from $0$ to $1$. We can simulate data to investigate the distribution of $Q$. Let's keep assume that we call gene $i$ significant when $p_i<0.05$.  
+  
+Besides,Function `rowttests()` calculates p value in a single step. We can try.
+
+```{r message=FALSE, warning=FALSE}
+library(genefilter) 
+group <- factor(c(rep("ALL",12),rep("NoL",12)))
+calls <- rowttests(dat,group)
+head(calls)
+```
+
+The simulation starts now:
+
+```{r cache=TRUE}
+alpha <- 0.05 # false positive rate for a sigle hypothesis
+sample_size <- 12
+m <- 20172 # total number of genes
+m1 <- 2000 # around 10% genes are significantly DE
+m0 <- m-m1 # m0 genes are not DE
+null_hypothesis <- c(rep(TRUE,m0),rep(FALSE,m1))
+
+simulated_data <- function(){
+  population_ne <- rnorm(100,mean=20,sd=3) # normal expressed genes
+  population_de <- rnorm(100,mean=23,sd=3) # differentially expressed genes
+  dat_ALL <- t(replicate(m,sample(population_ne,sample_size)))
+  dat_NoL_ne <- t(replicate(m0,sample(population_ne,sample_size)))
+  dat_NoL_de <- t(replicate(m1,sample(population_de,sample_size)))
+  dat_NoL <- rbind(dat_NoL_ne,dat_NoL_de)
+  cbind(dat_ALL,dat_NoL)
+}
+
+B <- 100
+Qs <- replicate(B,{
+  pvals <- rowttests(simulated_data(),group)$p.value
+  R <- sum(pvals<alpha)
+  V <- length(which(pvals<alpha & null_hypothesis==TRUE))
+  V/R
+})
+hist(Qs)
+```
+
+```{r}
+FDR <- mean(Qs)
+FDR
+```
+
+So on average, among 10 genes we called significant, 3-4 are actually not significant. This is very high false positive rate. Why? Let's see p value.
+
+```{r}
+pvals <- rowttests(simulated_data(),group)$p.value
+hist(pvals,breaks=seq(0,1,0.05))
+abline(h=m0/20)
+```
+
+The horizontal line signifies the distribution of p values when all nulls are true. The leftmost bar is what we call significant when $\alpha=0.05$. Around 50% of the bar lies under then line, this supports that the fact tha FDR is high.
+
+```{r}
+hist(pvals,breaks=seq(0,1,0.01))
+abline(h=m0/100)
+```
+
+The horizontal line signifies the distribution of p values when all nulls are true. The leftmost bar is what we call significant when $\alpha=0.01$.  
+Now we can try to develop a procedure to control FDR.
+
+## Benjamini-Hochberg
+
+Benjaminini-Hockberg procedure require us first order the p values in increasing order.
+```{r message=FALSE, warning=FALSE}
+library(genefilter)
+alpha <- 0.05
+set.seed(3)
+dat <- simulated_data()
+pvals <- rowttests(dat,group)$p.value
+par(mfrow=c(1,2))
+plot(sort(pvals))
+i <- seq(along=pvals)
+abline(0,i/m*alpha)
+# close up image
+plot(i[1:70],sort(pvals)[1:70],main="close-up")
+abline(0,i/m*alpha)
+```
+
+Then define $k$ to be the largest $i$ for which $p_{(i)}\leq \frac{i}{m} \alpha$. In our case it is around 50. Let's find out:
+```{r}
+k <- max(which(sort(pvals)<i/m*alpha))
+k
+```
+Finally we reject hypothesis with p value smaller or equal to $p_{(k)}$
+```{r}
+cutoff <- sort(pvals)[k]
+cutoff
+```
+
+How good is this cutoff? Can we really control FDR below 0.05 using this cutoff? 
+
+```{r}
+B <- 100
+Qs <- replicate(B,{
+  pvals <- rowttests(simulated_data(),group)$p.value
+  R <- sum(pvals<cutoff)
+  V <- length(which(pvals<cutoff & null_hypothesis==TRUE))
+  V/R
+})
+hist(Qs)
+```
+```{r}
+FDR <- mean(Qs)
+print(FDR)
+```
+
+Cool! Now FDR<0.05.
+
+## Function `p.adjust()`
+
+We can sense that each cutoff p value corresponds to an expected proportion of false discoveries amongst the rejected hypotheses. . Function `p.adjust()` calculate the FDR corresponding to each p value
+```{r}
+fdr <- p.adjust(pvals,method="fdr")
+plot(pvals,fdr,log="xy")
+abline(h=alpha,v=cutoff)
+```
+
+Only the genes at left down corner is selected, so the frd is controlled below 0.05.
+

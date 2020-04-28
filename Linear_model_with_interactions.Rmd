@@ -1,0 +1,125 @@
+---
+title: "Linear_model_with_interactions"
+author: "Xuening"
+date: "4/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data and EDA
+
+```{r}
+url <- "https://raw.githubusercontent.com/genomicsclass/dagdata/master/inst/extdata/spider_wolff_gorb_2013.csv"
+filename <- "spider.csv"
+if (!file.exists(filename)) download.file(url, filename)
+spider <- read.csv(filename, skip=1)
+table(spider$leg,spider$type)
+boxplot(spider$friction~spider$type*spider$leg,las=2,cex=0.3,xlab="",ylab="friction") # las=2 give vertical x labels
+```
+
+## Fit a linear model
+Design a model matrix that records the condition of both push/pull and leg number.
+```{r}
+X <- model.matrix(~type+leg,data=spider)
+head(X)
+colSums(X)
+```
+The column sum corresponds with the table. Now fit a linear model.
+```{r}
+fit <- lm(spider$friction~X+0)
+summary(fit)
+coefs <- coef(fit)
+coefs
+```
+
+## Interpret some coefficients
+
+The second coefficient is the difference in mean friction between type pull and push.
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+means <- spider %>% group_by(type) %>% summarize(mean=mean(friction))
+means
+```
+```{r}
+means$mean[2]-means$mean[1]
+coefs["Xtypepush"]
+```
+
+Yet the problem lies in the first coefficient. Theoretically it should be the average friction of leg L1 and type pull because this case is represented $[1,0,0,0,0]$ in model matrix and only first coefficient can fit it.
+
+```{r}
+spider %>% group_by(type,leg) %>% summarize(mean=mean(friction))
+coefs[1]
+```
+
+Oh? The mean of pull+L1 is 0.9214, not first coefficient 1.05. What happened?
+
+## Linear model with interaction
+What happened is that we assumed additive effects of `leg` and `type` thus didn't take into consideration the interactions between them. To fit a linear model with interaction, we need to redesign the model matrix.
+
+```{r}
+X <- model.matrix(~ type + leg + type:leg, data=spider)
+head(X)
+colSums(X)
+```
+
+`typepush:legL2` is just the product of value of `typepush` and `legL2`. Only 15 rows have value 1 for both `typepush` and `legL2`. Let's fit and see.
+
+```{r}
+fit <- lm(spider$friction~X+0)
+summary(fit)
+```
+
+## Interpret all coefficients
+
+Now let's interpret all coefficients.
+
+```{r}
+means_df <- spider %>% group_by(type,leg) %>% summarize(mean=mean(friction))
+means_df
+coefs <- coef(fit)
+coefs
+```
+`coefs['X(Intercept)']` is the average of L1 pull. `coefs['Xtypepush']` is the difference between L1 push and L1 pull.
+```{r}
+means_df[means_df$leg=="L1" & means_df$type=="push",]$mean-means_df[means_df$leg=="L1" & means_df$type=="pull",]$mean
+coefs['Xtypepush']
+```
+The average of L2 pull is `coefs['X(Intercept)']`+`coefs["XlegL2"]`:
+```{r}
+coefs['X(Intercept)']+coefs["XlegL2"]
+means_df[means_df$leg=="L2" & means_df$type=="pull",]$mean
+```
+ The average of L2 push is `coefs['X(Intercept)']`+`coefs["XlegL2"]`+`coefs["Xtypepush:legL2"]`+ `coefs["Xtypepush"]`.
+ 
+```{r}
+coefs['X(Intercept)']+coefs["XlegL2"]+coefs["Xtypepush:legL2"]+coefs["Xtypepush"]
+means_df[means_df$leg=="L2" & means_df$type=="push",]$mean
+```
+
+The average of L3 pull is `coefs['X(Intercept)']`+`coefs["XlegL3"]`:
+```{r}
+coefs['X(Intercept)']+coefs["XlegL3"]
+means_df[means_df$leg=="L3" & means_df$type=="pull",]$mean
+```
+ The average of L3 push is `coefs['X(Intercept)']`+`coefs["XlegL3"]`+`coefs["Xtypepush:legL3"]`+ `coefs["Xtypepush"]`.
+ 
+```{r}
+coefs['X(Intercept)']+coefs["XlegL3"]+coefs["Xtypepush:legL3"]+coefs["Xtypepush"]
+means_df[means_df$leg=="L3" & means_df$type=="push",]$mean
+```
+
+The average of L4 pull is `coefs['X(Intercept)']`+`coefs["XlegL4"]`:
+```{r}
+coefs['X(Intercept)']+coefs["XlegL4"]
+means_df[means_df$leg=="L4" & means_df$type=="pull",]$mean
+```
+ The average of L4 push is `coefs['X(Intercept)']`+`coefs["XlegL4"]`+`coefs["Xtypepush:legL4"]`+ `coefs["Xtypepush"]`.
+ 
+```{r}
+coefs['X(Intercept)']+coefs["XlegL4"]+coefs["Xtypepush:legL4"]+coefs["Xtypepush"]
+means_df[means_df$leg=="L4" & means_df$type=="push",]$mean
+```

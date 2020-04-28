@@ -1,0 +1,174 @@
+---
+title: "Linear_model_with_contrast"
+author: "Xuening"
+date: "4/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load data and EDA
+
+```{r}
+url <- "https://raw.githubusercontent.com/genomicsclass/dagdata/master/inst/extdata/spider_wolff_gorb_2013.csv"
+filename <- "spider.csv"
+if (!file.exists(filename)) download.file(url, filename)
+spider <- read.csv(filename, skip=1)
+table(spider$leg,spider$type)
+boxplot(spider$friction~spider$type*spider$leg,las=2,xlab="",ylab="friction") # las=2 give vertical x labels
+```
+
+## Fit a linear model
+Design a model matrix that records the condition of both push/pull and leg number.
+```{r}
+X <- model.matrix(~type+leg+type:leg,data=spider)
+head(X)
+colSums(X)
+```
+The column sum corresponds with the table. Now fit a linear model.
+```{r}
+fit <- lm(friction~type*leg,data=spider)
+summary(fit)
+coefs <- coef(fit)
+coefs
+```
+
+## Do L2 and L3 have same friction when pulling?
+
+The average friction of L2 pulling is `coefs["(Intercept)"]`+`coefs["legL2"]`. The average friction of L3 pulling is `coefs["(Intercept)"]`+`coefs["legL3"]`. Let's verify this:
+```{r message=FALSE, warning=FALSE}
+coefs["(Intercept)"]+coefs["legL2"]
+coefs["(Intercept)"]+coefs["legL3"]
+library(dplyr)
+spider %>% group_by(type, leg) %>% summarize(mean_val=mean(friction))
+```
+
+So the question equals to: is (`coefs["(Intercept)"]`+`coefs["legL2"]`)-(`coefs["(Intercept)"]`+`coefs["legL3"]`) significantly different from $0$? Since `coefs["(Intercept)"]` cancel out, we are asking whether `coefs["legL2"]`-`coefs["legL3"]` significantly different from $0$.  
+  
+Here contrast matrix come into play. We can write `coefs` as a column vector $\hat\beta$. Design contrast matrix as $c=[0,0,1,-1,0,0,0,0]^T$, and we find 
+$$c\hat\beta=\hat\beta_3-\hat\beta_4$$
+Other good properties:
+$$ E[\hat\beta_3-\hat\beta_4]=E[c^T\hat\beta]=c^TE[\hat\beta]=c^T\beta=\beta_3-\beta_4$$
+$$Var[\hat\beta_3-\hat\beta_4]=Var[c^T\hat\beta]=c^TVar(\hat\beta)c=\sigma^2c^T(X^TX)^{-1}c$$
+
+Let's calculate.
+```{r}
+coefs["legL2"]-coefs["legL3"]
+
+# calculate standard error
+# 1. estimate variance of beta
+var_beta <- sum(fit$residuals^2)/(nrow(X)-ncol(X)) * solve(crossprod(X))
+head(var_beta)
+```
+
+One thing to clarify: `var_beta` is the variance-covariance matrix of all the estimated parameters.
+
+```{r}
+c <- matrix(c(0,0,1,-1,0,0,0,0))
+se <- sqrt(t(c) %*% var_beta %*% c)
+se
+```
+Then t value:
+```{r}
+tval <- (coefs["legL2"]-coefs["legL3"])/se
+tval
+```
+
+Then p value:
+```{r}
+2*pt(-abs(tval),nrow(X)-ncol(X))
+```
+
+If $\alpha=0.05$ then we can conclude that L2 and L3 have significant difference in friction when pulling.  
+  
+We can also do the analysis above using lackage `contrast`.
+
+```{r message=FALSE, warning=FALSE}
+library(contrast)
+L2pull_L3pull <- contrast(fit,
+                          list(type="pull",leg="L2"),
+                          list(type="pull",leg="L3"))
+L2pull_L3pull
+```
+
+
+## Does push vs. pull have same effect on L2?
+
+```{r}
+L2push_L2pull <- contrast(fit,
+                          list(type="push",leg="L2"),
+                          list(type="pull",leg="L2"))
+L2push_L2pull
+```
+
+So push and pull have significantly different effects on L2.  
+  
+This question equals to: does (`coefs["(Intercept)"]`+`coefs["legL2"]`+`coefs["typepush"]`+`coefs["typepush:legL2"]`) significantly different from (`coefs["(Intercept)"]`+`coefs["legL2"]`). After cancelling out, only `coefs["typepush"]`+`coefs["typepush:legL2"]` is left. Let's try.
+
+```{r}
+coefs["typepush"]+coefs["typepush:legL2"]
+```
+
+## Does push vs. pull have equal effects on L1 and L2?
+
+Push-pull difference on L1 is (`coefs["(Intercept)"]`+`coefs["typepush"]`)-`coefs["(Intercept)"]`=`coefs["typepush"]`.  
+
+Push-pull difference on L2 is (`coefs["(Intercept)"]`+`coefs["typepush"]`+`coefs["legL2"]`+`coefs["typepush:legL2"]`)-(`coefs["(Intercept)"]`+`coefs["legL2"]`)=`coefs["typepush"]`+`coefs["typepush:legL2"]`.  
+  
+The difference between difference is `coefs["typepush:legL2"]`. So let's see its t value and p value.
+
+```{r}
+summary(fit)$coefficients
+```
+
+The p value is 0.2144, so push vs. pull effects on L1 and L2 have no significant difference.
+
+## Does push vs. pull have equal effects on L2 and L3?
+
+Push-pull difference on L2 is (`coefs["(Intercept)"]`+`coefs["typepush"]`+`coefs["legL2"]`+`coefs["typepush:legL2"]`)-(`coefs["(Intercept)"]`+`coefs["legL2"]`)=`coefs["typepush"]`+`coefs["typepush:legL2"]`.   
+
+Push-pull difference on L3 is (`coefs["(Intercept)"]`+`coefs["typepush"]`+`coefs["legL3"]`+`coefs["typepush:legL3"]`)-(`coefs["(Intercept)"]`+`coefs["legL3"]`)=`coefs["typepush"]`+`coefs["typepush:legL3"]`.  
+
+The difference between the difference is `coefs["typepush:legL3"]`-`coefs["typepush:legL2"]`
+
+Let validate this.
+
+```{r message=FALSE, warning=FALSE}
+library(multcomp)
+C <- matrix(c(0,0,0,0,0,-1,1,0), 1)
+L3vsL2interaction <- glht(fit, linfct=C)
+summary(L3vsL2interaction)
+```
+
+```{r}
+coefs["typepush:legL3"]-coefs["typepush:legL2"]
+```
+
+And the answer: push vs. pull have significantly different effects on L2 and L3.
+
+## Model matrix without intercept
+
+```{r}
+spider$group <- factor(paste0(spider$leg, spider$type))
+X <- model.matrix(~ 0 + group, data=spider)
+head(X)
+fitG <- lm(friction ~ 0 + group, data=spider)
+summary(fitG)
+coefs <- coef(fitG)
+coefs
+```
+
+This time there is no intercepts. Thus the push vs. pull difference across L2 and L3 is just (`coefs["groupL3push"]`-`coefs["groupL3pull"]`)-(`coefs["groupL2push"]`-`coefs["groupL2pull"]`).
+
+```{r}
+C <- matrix(c(0,0,1,-1,-1,1,0,0), 1)
+groupL3vsL2interaction <- glht(fitG, linfct=C)
+summary(groupL3vsL2interaction)
+```
+This is the same as
+```{r}
+coefs["groupL3push"]-coefs["groupL3pull"]-(coefs["groupL2push"]- coefs["groupL2pull"])
+```
+

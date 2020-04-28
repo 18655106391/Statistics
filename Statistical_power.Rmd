@@ -1,0 +1,109 @@
+---
+title: "Statistical_power"
+author: "Xuening"
+date: "4/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Power
+Power is the probability of rejecting the null hypothesis when the null is false, i.e. true positive rate. How does it change along with sample size and $\alpha$? Let's find out.
+
+## Generate data set
+Suppose we have control and experimental group, and they observes normal distribution with different mean and variance. Let's generate the data set using random number generator.
+
+```{r}
+set.seed(1)
+control_population <- rnorm(100,20,3) # mean=20, sd=3
+experiment_population <- rnorm(100,23,4)
+```
+
+## Simulate to calculate power
+Clearly the null hypothesis is false. The two populations have different mean. But by sampling can we reject the null hypothesis each time?
+```{r}
+reject <- function(n,alpha=0.05){
+        control_sample <- sample(control_population,n)
+        experiment_sample <- sample(experiment_population,n)
+        pval <- t.test(control_sample,experiment_sample)$p.value
+        pval < alpha # TRUE means that we reject the null hypothesis
+}
+sample_size <- 10
+set.seed(1)
+rejections <- replicate(1000,reject(sample_size))
+mean(rejections)
+```
+The power is 0.317. That is to say, when sample size is 10, in 31.7% of the time we can correctly reject the null hypothesis.  
+
+## How sample size influences power
+```{r}
+sample_size <- seq(5,100,10)
+power <- sapply(sample_size,function(i){
+        rejections <- replicate(1000,reject(i))
+        mean(rejections)
+})
+plot(sample_size,power,type="b")
+```
+
+As we can see, as sample size increases, power, the possibility of correct rejection also increases.
+
+## How $\alpha$ influences power
+```{r}
+alphas <- c(0.0001,0.001,0.01,0.05,0.1)
+sample_size <- 10
+power <- sapply(alphas,function(alpha){
+        rejections <- replicate(1000,reject(sample_size,alpha))
+        mean(rejections)
+})
+plot(alphas,power,log="x",type="b")
+```
+
+$\alpha$ is the false positive rate. Therefore, as $\alpha$ increases, we allow more false rejections when null is true. This increasing tolerance also increase true positive rate, i.e. power.
+
+## Statistical power also depends on population distribution
+
+Normally we want power to be high and $\alpha$ remains low. So how do we determine sample size so that power is high as $\alpha$ is reasonably low? It depends on population distributions. If we fix sample size at 10 and $\alpha$ 0.05, the power of the following t-tests still differ.
+```{r}
+set.seed(1)
+sample_size <- 10
+#  increase difference of mean of two groups
+control_population <- rnorm(100,20,3) 
+experiment_population <- rnorm(100,26,4)
+rejections <- replicate(1000,reject(sample_size))
+mean(rejections)
+```
+
+By increasing the difference of mean of the two groups, the power increase from 0.317 to 0.967.
+
+```{r}
+#  increase variance of two groups
+set.seed(1)
+control_population <- rnorm(100,20,4) 
+experiment_population <- rnorm(100,23,5)
+rejections <- replicate(1000,reject(sample_size))
+mean(rejections)
+```
+
+By increasing variance of two groups, the power decreases from 0.317 to 0.189.
+  
+This data tells us that if the distribution of two groups overlap a lot, then the sample size need to be large to obtain a high power. If the distribution of two groups seldoms overlap, then small sample size will suffice.
+
+## Second thought about p-value
+When null hypothesis is true, p-value shows the possibility of false positive. However, when null hypothesis is not true, thus the alternative hypothesis is true, p-value is somewhat arbitrary because we can make a p-value as small as we want simply by increasing the sample size.  
+
+```{r}
+set.seed(1)
+control_population <- rnorm(100,20,3) #mean=20, sd=3
+experiment_population <- rnorm(100,23,4) #mean=23,sd=4, null hypothesis is false
+sample_size <- rep(seq(5,95,5),each=10)
+pval <- sapply(sample_size,function(size){
+  control_sample <- sample(control_population,size)
+  experiment_sample <- sample(experiment_population,size)
+  t.test(control_sample,experiment_sample)$p.value
+})
+plot(sample_size,pval,log="y")
+```
+
+Why does p value decrease with sample size? Remember, $t=\frac{\bar{X_1}-\bar{X_2}}{s/\sqrt{n}}$ and null hypothesis is false. As sample size $n$ increases, $\bar{X_1}-\bar{X_2}$ will fluctuate a bit around their true difference, in this case: $23-20=3$. $s$ is the standard deviation of the joint samples and also fluctuate around their true difference as $n$ increases. So the major effect of $n$ on $t$ statistics is the item $\sqrt{n}$. As $\sqrt{n}$ increases, $t$ increase, p value falls.  

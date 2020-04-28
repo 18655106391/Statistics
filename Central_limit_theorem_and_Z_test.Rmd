@@ -1,0 +1,46 @@
+---
+title: "Central_limit_theorem and Z test"
+author: "Xuening"
+date: "4/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Central limit theorem
+Suppose $X_1,X_2,...,X_n$ is a random sample of size $n$ taken from a population with mean $\mu$ and finite variance $\sigma^2$. If $\bar{X}=\frac{1}{n}\sum_{i=1}^n X_i$, then as $n \rightarrow \infty$, $\bar{X}$ observes normal distribution with mean $\mu$ and standard deviation$\sigma/\sqrt{n}$. That is to say, the distribution of $Z=\frac{\bar{X}-\mu}{\sigma/\sqrt{n}}$ is a standard normal distribution. The value of $Z$ is also called Z-statistic or Z-score.
+
+## Power of central limit theorem
+The population may observe whatever distribution. But when the sample size $n$ is large enough, normal distribution can describe the distribution of sample mean pretty well. This give us the ability to calculate confidence interval, t-statistics and others without knowing the distribution of population.  
+  
+How large is large enough for sample size? Usually 30 is picked as threshold, but the distribution of population and other factors also influence this threshold.
+
+## Example: when population is uniform distributed
+```{r}
+population <- rpois(100,5) # 1000 samples 
+hist(population)
+
+#create sample of size=3, 10,20,30
+sizes <- c(3,10,20,30)
+par(mfrow=c(2,2))
+for (size in sizes){
+        samples <- replicate(1000,sample(population,size,replace=T))
+        hist(colMeans(samples),main=paste0("Sample size=",size),breaks = 20)
+}
+
+#using quantiles to compare with normal distribution
+par(mfrow=c(2,2))
+for (size in sizes){
+        samples <- replicate(1000,sample(population,size,replace=T))
+        qqnorm(colMeans(samples),main=paste0("Sample size=",size),cex=0.5)
+        qqline(colMeans(samples))
+}
+```
+
+
+## Z test
+As we've said, let $Z=\frac{\bar{X}-\mu}{\sigma/\sqrt{n}}$, then Z observes normal distribution. Theoretically, Z test is used when population variance is known and sample size is large. However, in practice Z test is used as long as sample size is large, even if population variance is unknown.  
+  
+When sample size is small, t-test is more appropriate.
